@@ -12,9 +12,11 @@ public class TransferReceiveTransaction extends BaseTransaction {
         this.sourceAccountNumber = sourceAccountNumber;
     }
 
-    public TransferReceiveTransaction(double amount, int sourceAccountNumber, java.time.LocalDateTime timestamp,
+    public TransferReceiveTransaction(double amount, int sourceAccountNumber, LocalDateTime timestamp,
             String transactionId) {
         super(amount, timestamp, transactionId);
+        this.sourceAccountNumber = sourceAccountNumber;
+    }
 
     public TransferReceiveTransaction(double amount, int sourceAccountNumber, String transactionId,
             LocalDateTime timestamp) {

@@ -5,10 +5,6 @@ import banking.account.AccountFactory;
 import banking.account.CurrentAccount;
 import banking.account.FixedDepositAccount;
 import banking.account.SavingsAccount;
-import banking.snapshot.AccountSnapshot;
-import banking.snapshot.BankSnapshot;
-import banking.snapshot.TransactionSnapshot;
-import banking.snapshot.TransactionType;
 import banking.observer.AccountObserver;
 import banking.observer.ConsoleNotifier;
 import banking.observer.TransactionLogger;
@@ -17,21 +13,33 @@ import banking.operation.DepositOperation;
 import banking.operation.OperationResult;
 import banking.operation.TransferOperation;
 import banking.operation.WithdrawOperation;
+import banking.persistence.AccountRepository;
+import banking.persistence.PersistenceException;
+import banking.persistence.memory.InMemoryAccountRepository;
+import banking.report.AccountAnalyticsService;
+import banking.report.AnalyticsReportOperation;
+import banking.report.AnalyticsReport;
+import banking.report.AnalyticsReportRequest;
+import banking.snapshot.AccountSnapshot;
+import banking.snapshot.BankSnapshot;
+import banking.snapshot.TransactionSnapshot;
+import banking.snapshot.TransactionType;
 import banking.transaction.BaseTransaction;
 import banking.transaction.DepositTransaction;
 import banking.transaction.InterestTransaction;
 import banking.transaction.TransferReceiveTransaction;
 import banking.transaction.TransferTransaction;
 import banking.transaction.WithdrawalTransaction;
-import banking.persistence.AccountRepository;
-import banking.persistence.PersistenceException;
 
 import java.security.SecureRandom;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
@@ -43,52 +51,66 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.Locale;
 
+/**
+ * Core banking aggregate coordinating account lifecycle and operations.
+ */
 public class Bank implements AutoCloseable {
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final Map<Integer, Account> accounts;
     private final AccountRepository repository;
     private final Map<Integer, ReentrantLock> accountLocks;
-    private transient List<AccountObserver> observers;
-    private transient Queue<QueuedOperation> operationQueue;
-    private transient ExecutorService executorService;
-    private transient List<CompletableFuture<OperationResult>> pendingOperations;
-    private transient List<CompletableFuture<?>> backgroundTasks;
+    private final List<AccountObserver> observers;
+    private final Queue<QueuedOperation> operationQueue;
+    private final ExecutorService executorService;
+    private final List<CompletableFuture<OperationResult>> pendingOperations;
+    private final List<CompletableFuture<?>> backgroundTasks;
 
     public Bank() {
-        this(new HashMap<>());
+        this(new InMemoryAccountRepository());
     }
-
-    private Bank(Map<Integer, Account> accounts) {
-        this.accounts = new HashMap<>(accounts);
 
     public Bank(AccountRepository repository) {
-        this.repository = Objects.requireNonNull(repository, "repository");
-        this.accounts = new HashMap<>();
-        this.accountLocks = new ConcurrentHashMap<>();
-        initializeTransientState();
-        loadAccountsFromRepository();
+        this(repository, loadAccounts(repository));
     }
 
-    private void loadAccountsFromRepository() {
+    private Bank(AccountRepository repository, Map<Integer, Account> initialAccounts) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        this.accounts = new HashMap<>(Objects.requireNonNull(initialAccounts, "initialAccounts"));
+        this.accountLocks = new ConcurrentHashMap<>();
+        this.observers = new CopyOnWriteArrayList<>();
+        this.operationQueue = new ConcurrentLinkedQueue<>();
+        this.executorService = Executors.newFixedThreadPool(5);
+        this.pendingOperations = new CopyOnWriteArrayList<>();
+        this.backgroundTasks = new CopyOnWriteArrayList<>();
+
+        accounts.keySet().forEach(number -> accountLocks.put(number, new ReentrantLock()));
+
+        addObserver(new ConsoleNotifier());
+        addObserver(new TransactionLogger());
+    }
+
+    private static Map<Integer, Account> loadAccounts(AccountRepository repository) {
+        Map<Integer, Account> loaded = new HashMap<>();
         for (Account account : repository.findAllAccounts()) {
-            accounts.put(account.getAccountNumber(), account);
-            accountLocks.putIfAbsent(account.getAccountNumber(), new ReentrantLock());
+            loaded.put(account.getAccountNumber(), account);
         }
+        return loaded;
     }
 
     public static Bank restore(BankSnapshot snapshot) {
-        Map<Integer, Account> accounts = new HashMap<>();
+        Map<Integer, Account> restored = new HashMap<>();
         for (AccountSnapshot accountSnapshot : snapshot.accounts()) {
             Account account = AccountFactory.restoreAccount(accountSnapshot);
-            accounts.put(account.getAccountNumber(), account);
+            restored.put(account.getAccountNumber(), account);
         }
-        return new Bank(accounts);
+        InMemoryAccountRepository repository = new InMemoryAccountRepository();
+        repository.saveAccounts(restored.values());
+        return new Bank(repository, restored);
     }
 
     public synchronized BankSnapshot snapshot() {
@@ -115,12 +137,13 @@ public class Bank implements AutoCloseable {
             overdraftLimit = currentAccount.getOverdraftLimit();
         } else if (account instanceof FixedDepositAccount fixedDepositAccount) {
             termMonths = fixedDepositAccount.getTermMonths();
-            maturityDate = fixedDepositAccount.getMaturityDate().toString();
+            LocalDateTime maturity = fixedDepositAccount.getMaturityDate();
+            maturityDate = maturity != null ? maturity.toString() : null;
         }
 
-        return new AccountSnapshot(canonicalAccountType(account), account.getAccountNumber(), account.getUserName(),
-                account.getBalance(), account.getCreationDate(), minimumBalance, overdraftLimit, termMonths,
-                maturityDate, transactions);
+        return new AccountSnapshot(account.getAccountType().toUpperCase(Locale.ROOT), account.getAccountNumber(),
+                account.getUserName(), account.getBalance(), account.getCreationDate(), minimumBalance, overdraftLimit,
+                termMonths, maturityDate, transactions);
     }
 
     private static TransactionSnapshot toSnapshot(BaseTransaction transaction) {
@@ -148,19 +171,6 @@ public class Bank implements AutoCloseable {
                 transaction.getTransactionId(), sourceAccount, targetAccount);
     }
 
-    private static String canonicalAccountType(Account account) {
-        if (account instanceof SavingsAccount) {
-            return "SAVINGS";
-        }
-        if (account instanceof CurrentAccount) {
-            return "CURRENT";
-        }
-        if (account instanceof FixedDepositAccount) {
-            return "FIXED_DEPOSIT";
-        }
-        return account.getAccountType().toUpperCase(Locale.ROOT).replace(' ', '_');
-    }
-
     public synchronized void addObserver(AccountObserver observer) {
         observers.add(Objects.requireNonNull(observer, "observer"));
     }
@@ -185,22 +195,22 @@ public class Bank implements AutoCloseable {
 
     public synchronized boolean closeAccount(int accountNumber) {
         Account account = accounts.remove(accountNumber);
-        if (account != null) {
-            try {
-                boolean deleted = repository.deleteAccount(accountNumber);
-                if (!deleted) {
-                    accounts.put(accountNumber, account);
-                    return false;
-                }
-                accountLocks.remove(accountNumber);
-                notifyObservers("Account closed: " + account.getAccountNumber() + " for " + account.getUserName());
-                return true;
-            } catch (PersistenceException e) {
-                accounts.put(accountNumber, account);
-                throw e;
-            }
+        if (account == null) {
+            return false;
         }
-        return false;
+        try {
+            boolean deleted = repository.deleteAccount(accountNumber);
+            if (!deleted) {
+                accounts.put(accountNumber, account);
+                return false;
+            }
+            accountLocks.remove(accountNumber);
+            notifyObservers("Account closed: " + accountNumber + " for " + account.getUserName());
+            return true;
+        } catch (PersistenceException e) {
+            accounts.put(accountNumber, account);
+            throw e;
+        }
     }
 
     public synchronized boolean updateAccountHolderName(int accountNumber, String newName) {
@@ -228,19 +238,19 @@ public class Bank implements AutoCloseable {
     }
 
     public synchronized int getPendingOperationCount() {
-        return pendingOperations == null ? 0 : pendingOperations.size();
+        return pendingOperations.size();
     }
 
     public synchronized List<Account> getAccountsByType(String accountType) {
         return accounts.values().stream()
-                .filter(a -> a.getAccountType().toLowerCase().contains(accountType.toLowerCase()))
+                .filter(a -> a.getAccountType().toLowerCase(Locale.ROOT).contains(accountType.toLowerCase(Locale.ROOT)))
                 .collect(Collectors.toList());
     }
 
     public synchronized List<Account> searchAccounts(String keyword) {
-        String lowercaseKeyword = keyword.toLowerCase();
+        String lowercaseKeyword = keyword.toLowerCase(Locale.ROOT);
         return accounts.values().stream()
-                .filter(a -> a.getUserName().toLowerCase().contains(lowercaseKeyword))
+                .filter(a -> a.getUserName().toLowerCase(Locale.ROOT).contains(lowercaseKeyword))
                 .collect(Collectors.toList());
     }
 
@@ -248,7 +258,7 @@ public class Bank implements AutoCloseable {
             AccountAnalyticsService analyticsService) {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(analyticsService, "analyticsService");
-        List<AccountSnapshot> snapshots = createAccountSnapshots();
+        List<banking.report.AccountSnapshot> snapshots = analyticsSnapshots();
         AnalyticsReportOperation operation = new AnalyticsReportOperation(request, analyticsService, snapshots);
         CompletableFuture<AnalyticsReport> reportFuture = operation.getReportFuture();
         CompletableFuture<OperationResult> operationFuture = queueOperation(operation);
@@ -343,20 +353,14 @@ public class Bank implements AutoCloseable {
 
     public void shutdown() {
         awaitPendingOperations();
-        ExecutorService executor;
-        synchronized (this) {
-            executor = this.executorService;
-        }
-        if (executor != null) {
-            executor.shutdown();
-            try {
-                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    executor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
             }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
         }
         try {
             repository.close();
@@ -424,6 +428,8 @@ public class Bank implements AutoCloseable {
             future.completeExceptionally(e);
         } finally {
             backgroundTasks.remove(future);
+        }
+    }
 
     private List<ReentrantLock> acquireLocks(AccountOperation operation) {
         List<Integer> accountNumbers = operation.getInvolvedAccountNumbers();
@@ -447,7 +453,7 @@ public class Bank implements AutoCloseable {
         }
     }
 
-    private void updateAccounts(List<Account> updatedAccounts) {
+    private void updateAccounts(Collection<Account> updatedAccounts) {
         if (updatedAccounts == null || updatedAccounts.isEmpty()) {
             return;
         }
@@ -469,21 +475,10 @@ public class Bank implements AutoCloseable {
         }
     }
 
-    private synchronized List<AccountSnapshot> createAccountSnapshots() {
+    private synchronized List<banking.report.AccountSnapshot> analyticsSnapshots() {
         return accounts.values().stream()
-                .map(AccountSnapshot::fromAccount)
+                .map(banking.report.AccountSnapshot::fromAccount)
                 .collect(Collectors.toList());
-    }
-
-    private void initializeTransientState() {
-        this.observers = new CopyOnWriteArrayList<>();
-        this.operationQueue = new ConcurrentLinkedQueue<>();
-        this.executorService = Executors.newFixedThreadPool(5);
-        this.pendingOperations = new CopyOnWriteArrayList<>();
-        this.backgroundTasks = new CopyOnWriteArrayList<>();
-
-        addObserver(new ConsoleNotifier());
-        addObserver(new TransactionLogger());
     }
 
     public void awaitPendingOperations() {

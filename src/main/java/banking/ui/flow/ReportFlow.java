@@ -12,8 +12,6 @@ import banking.report.analytics.AnomalyReport;
 import banking.report.analytics.RangeSummary;
 import banking.report.analytics.TrendReport;
 import banking.report.format.ReportFormatter;
-import banking.report.AccountStatement;
-import banking.report.StatementGenerator;
 import banking.service.Bank;
 import banking.transaction.BaseTransaction;
 import banking.ui.console.ConsoleIO;
@@ -29,6 +27,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Coordinates the reporting workflows surfaced in the console.
+ */
 public class ReportFlow {
     private final Bank bank;
     private final ConsoleIO io;
@@ -37,6 +38,8 @@ public class ReportFlow {
     private final StatementPresenter statementPresenter;
     private final AccountAnalyticsService analyticsService;
     private final AnalyticsPresenter analyticsPresenter;
+    private final AnalyticsReportService analyticsReportService;
+    private final ReportFormatter reportFormatter;
 
     public ReportFlow(Bank bank,
             ConsoleIO io,
@@ -44,8 +47,9 @@ public class ReportFlow {
             StatementGenerator statementGenerator,
             StatementPresenter statementPresenter,
             AccountAnalyticsService analyticsService,
-            AnalyticsPresenter analyticsPresenter) {
-            StatementPresenter statementPresenter) {
+            AnalyticsPresenter analyticsPresenter,
+            AnalyticsReportService analyticsReportService,
+            ReportFormatter reportFormatter) {
         this.bank = bank;
         this.io = io;
         this.accountPresenter = accountPresenter;
@@ -53,32 +57,37 @@ public class ReportFlow {
         this.statementPresenter = statementPresenter;
         this.analyticsService = analyticsService;
         this.analyticsPresenter = analyticsPresenter;
+        this.analyticsReportService = analyticsReportService;
+        this.reportFormatter = reportFormatter;
     }
 
     public void showReportsMenu() {
-        io.heading("Reports");
-        io.info("1. Account Summary Report");
-        io.info("2. High-Value Accounts Report");
-        io.info("3. Transaction Volume Report");
-        io.info("4. Generate Account Statement");
-        io.info("5. Portfolio Analytics Summary");
-        io.info("6. Export Portfolio Analytics (CSV)");
-        io.info("7. Export Portfolio Analytics (JSON)");
-        io.info("8. Back to Main Menu");
-        io.info("5. Back to Main Menu");
+        boolean back = false;
+        while (!back) {
+            io.heading("Reports");
+            io.info("1. Account Summary Report");
+            io.info("2. High-Value Accounts Report");
+            io.info("3. Transaction Volume Report");
+            io.info("4. Generate Account Statement");
+            io.info("5. Portfolio Analytics Summary");
+            io.info("6. Export Portfolio Analytics (CSV)");
+            io.info("7. Export Portfolio Analytics (JSON)");
+            io.info("8. Advanced Analytics Toolbox");
+            io.info("9. Back to Main Menu");
 
-        int choice = io.promptInt("Select a report to generate: ");
-        switch (choice) {
-            case 1 -> accountPresenter.showAccountSummary(bank.getAllAccounts());
-            case 2 -> generateHighValueReport();
-            case 3 -> generateTransactionVolumeReport();
-            case 4 -> generateAccountStatement();
-            case 5 -> generatePortfolioAnalyticsSummary();
-            case 6 -> exportPortfolioAnalyticsCsv();
-            case 7 -> exportPortfolioAnalyticsJson();
-            case 8 -> io.info("Returning to main menu...");
-            case 5 -> io.info("Returning to main menu...");
-            default -> io.error("Invalid choice!");
+            int choice = io.promptInt("Select a report to generate: ");
+            switch (choice) {
+                case 1 -> accountPresenter.showAccountSummary(bank.getAllAccounts());
+                case 2 -> generateHighValueReport();
+                case 3 -> generateTransactionVolumeReport();
+                case 4 -> generateAccountStatement();
+                case 5 -> generatePortfolioAnalyticsSummary();
+                case 6 -> exportPortfolioAnalyticsCsv();
+                case 7 -> exportPortfolioAnalyticsJson();
+                case 8 -> advancedAnalyticsMenu();
+                case 9 -> back = true;
+                default -> io.error("Invalid choice!");
+            }
         }
     }
 
@@ -161,6 +170,77 @@ public class ReportFlow {
         }
     }
 
+    private void advancedAnalyticsMenu() {
+        boolean back = false;
+        while (!back) {
+            io.subHeading("Advanced Analytics");
+            io.info("1. Transaction Trend (JSON)");
+            io.info("2. Transaction Trend (CSV)");
+            io.info("3. Anomaly Detection (JSON)");
+            io.info("4. Anomaly Detection (CSV)");
+            io.info("5. Range KPIs (JSON)");
+            io.info("6. Range KPIs (CSV)");
+            io.info("7. Back");
+            int choice = io.promptInt("Choose an option: ");
+            switch (choice) {
+                case 1 -> showTrendReportJson();
+                case 2 -> showTrendReportCsv();
+                case 3 -> showAnomalyReportJson();
+                case 4 -> showAnomalyReportCsv();
+                case 5 -> showRangeSummaryJson();
+                case 6 -> showRangeSummaryCsv();
+                case 7 -> back = true;
+                default -> io.error("Invalid choice.");
+            }
+        }
+    }
+
+    private void showTrendReportJson() {
+        AnalyticsRange range = promptAnalyticsRange();
+        TrendReport report = analyticsReportService.queueTrendReport(range).join();
+        io.subHeading("Trend Report (JSON)");
+        io.println(reportFormatter.toJson(report));
+    }
+
+    private void showTrendReportCsv() {
+        AnalyticsRange range = promptAnalyticsRange();
+        TrendReport report = analyticsReportService.queueTrendReport(range).join();
+        io.subHeading("Trend Report (CSV)");
+        io.println(reportFormatter.toCsv(report));
+    }
+
+    private void showAnomalyReportJson() {
+        AnalyticsRange range = promptAnalyticsRange();
+        double threshold = io.promptDouble("Absolute amount threshold (e.g. 5000): ");
+        double deviation = io.promptDouble("Deviation multiplier (e.g. 3 for 3σ): ");
+        AnomalyReport report = analyticsReportService.queueAnomalyReport(range, threshold, deviation).join();
+        io.subHeading("Anomaly Report (JSON)");
+        io.println(reportFormatter.toJson(report));
+    }
+
+    private void showAnomalyReportCsv() {
+        AnalyticsRange range = promptAnalyticsRange();
+        double threshold = io.promptDouble("Absolute amount threshold (e.g. 5000): ");
+        double deviation = io.promptDouble("Deviation multiplier (e.g. 3 for 3σ): ");
+        AnomalyReport report = analyticsReportService.queueAnomalyReport(range, threshold, deviation).join();
+        io.subHeading("Anomaly Report (CSV)");
+        io.println(reportFormatter.toCsv(report));
+    }
+
+    private void showRangeSummaryJson() {
+        AnalyticsRange range = promptAnalyticsRange();
+        RangeSummary summary = analyticsReportService.queueRangeSummary(range).join();
+        io.subHeading("Range Summary (JSON)");
+        io.println(reportFormatter.toJson(summary));
+    }
+
+    private void showRangeSummaryCsv() {
+        AnalyticsRange range = promptAnalyticsRange();
+        RangeSummary summary = analyticsReportService.queueRangeSummary(range).join();
+        io.subHeading("Range Summary (CSV)");
+        io.println(reportFormatter.toCsv(summary));
+    }
+
     private AnalyticsReportRequest promptAnalyticsRequest() {
         LocalDate defaultStart = LocalDate.now().minusDays(30);
         LocalDate defaultEnd = LocalDate.now();
@@ -205,6 +285,12 @@ public class ReportFlow {
                 .build();
     }
 
+    private AnalyticsRange promptAnalyticsRange() {
+        LocalDate start = promptOptionalDate("Start date (yyyy-MM-dd)", LocalDate.now().minusDays(30));
+        LocalDate end = promptOptionalDate("End date (yyyy-MM-dd)", LocalDate.now());
+        return new AnalyticsRange(start, end);
+    }
+
     private LocalDate promptForDate(String prompt) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
         while (true) {
@@ -230,5 +316,4 @@ public class ReportFlow {
             }
         }
     }
-}
 }

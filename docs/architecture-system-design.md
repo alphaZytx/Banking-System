@@ -149,11 +149,8 @@ Automation clients and staging smoke tests interact with the unified HTTP adapte
 - Store database backups (or in-memory snapshots during development) offsite.
 - Validate backups by performing periodic restore drills in a staging environment.
 - Automate log shipping to aid in reconstructing transaction sequences during investigations.
-<<<<<<< HEAD
 
 ### State Management & Migrations
-- Relational storage is handled through the JDBC repository. On boot the `BankRepositoryFactory` wires a `DriverManagerDataSource`, executes deterministic schema migrations, and exposes a repository that maps accounts and transactions into normalized tables.
-- `deploy/scripts/run-migrations.sh` invokes `banking.persistence.repository.DatabaseMigrationCli`, ensuring Kubernetes jobs, Terraform pipelines, or GitHub Actions runners can upgrade the schema ahead of traffic shifts. Migrations are versioned in the `bank_schema_migrations` table and run transactionally for idempotency.
-- Local developers can switch back to the filesystem-backed snapshot repository by unsetting `BANKING_STORAGE_MODE`. Legacy `.ser` files are read on first boot and persisted into the relational schema to maintain backwards compatibility.
-=======
->>>>>>> origin/pr/16
+- The runtime selects an `AccountRepository` implementation based on configuration. For relational storage the application bootstraps a `JdbcConnectionProvider`, runs deterministic migrations via `banking.persistence.jdbc.MigrationRunner`, and persists accounts in normalized tables.
+- Local development defaults to the in-memory repository (`InMemoryAccountRepository`), which requires no external dependencies and automatically deep-copies aggregates to avoid shared-mutable-state bugs.
+- When switching between storage modes, existing snapshot or database state is loaded through `BankDAO`, ensuring historical data is migrated forward exactly once before the new repository becomes authoritative.

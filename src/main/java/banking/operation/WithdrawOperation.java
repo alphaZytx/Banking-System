@@ -1,19 +1,15 @@
 package banking.operation;
 
 import banking.account.Account;
-
-public class WithdrawOperation implements AccountOperation {
-    private final Account account;
-    private final double amount;
-
-    public WithdrawOperation(Account account, double amount) {
-        this.account = account;
 import banking.persistence.AccountRepository;
 import banking.persistence.PersistenceException;
 
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Withdraws funds from an account while enforcing business rules and persistence.
+ */
 public class WithdrawOperation implements AccountOperation {
     private final AccountRepository repository;
     private final int accountNumber;
@@ -28,11 +24,6 @@ public class WithdrawOperation implements AccountOperation {
 
     @Override
     public OperationResult execute() {
-        try {
-            boolean withdrawn = account.withdraw(amount);
-            if (withdrawn) {
-                return OperationResult.success("Withdrawal of " + amount + " completed for account "
-                        + account.getAccountNumber());
         Account account = repository.findAccount(accountNumber);
         if (account == null) {
             return OperationResult.failure("Account not found: " + accountNumber);
@@ -41,7 +32,9 @@ public class WithdrawOperation implements AccountOperation {
             if (account.withdraw(amount)) {
                 repository.saveAccount(account);
                 affectedAccount = account;
-                return OperationResult.success("Withdrawal of " + amount + " completed for account " + accountNumber);
+                return OperationResult.success(
+                    "Withdrawal of " + amount + " completed for account " + accountNumber
+                );
             }
             return OperationResult.failure("Withdrawal failed due to insufficient balance or account rules.");
         } catch (IllegalArgumentException e) {
@@ -53,9 +46,6 @@ public class WithdrawOperation implements AccountOperation {
 
     @Override
     public String getDescription() {
-        return "Withdrawal of " + amount + " from account " + account.getAccountNumber();
-    }
-}
         return "Withdrawal of " + amount + " from account " + accountNumber;
     }
 

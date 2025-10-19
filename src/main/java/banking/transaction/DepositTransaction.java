@@ -9,8 +9,9 @@ public class DepositTransaction extends BaseTransaction {
         super(amount);
     }
 
-    public DepositTransaction(double amount, java.time.LocalDateTime timestamp, String transactionId) {
+    public DepositTransaction(double amount, LocalDateTime timestamp, String transactionId) {
         super(amount, timestamp, transactionId);
+    }
 
     public DepositTransaction(double amount, String transactionId, LocalDateTime timestamp) {
         super(amount, transactionId, timestamp);

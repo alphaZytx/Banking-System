@@ -70,7 +70,7 @@ public class ApiServerFlow {
         }
         server.start();
         io.success("Bank API started on port " + server.getPort());
-        io.info("Use the following access token for API calls:");
+        io.info("Use the following bearer token for API calls (Authorization: Bearer <token>):");
         io.println(token.token());
     }
 

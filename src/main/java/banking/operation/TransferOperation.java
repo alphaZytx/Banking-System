@@ -7,6 +7,9 @@ import banking.persistence.PersistenceException;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Moves funds between two accounts in a single atomic operation.
+ */
 public class TransferOperation implements AccountOperation {
     private final AccountRepository repository;
     private final int sourceAccountNumber;
@@ -27,24 +30,6 @@ public class TransferOperation implements AccountOperation {
 
     @Override
     public OperationResult execute() {
-        Account firstLock = sourceAccount.getAccountNumber() < targetAccount.getAccountNumber()
-                ? sourceAccount
-                : targetAccount;
-        Account secondLock = firstLock == sourceAccount ? targetAccount : sourceAccount;
-
-        synchronized (firstLock) {
-            synchronized (secondLock) {
-                try {
-                    boolean transferred = sourceAccount.transfer(amount, targetAccount);
-                    if (transferred) {
-                        return OperationResult.success("Transfer of " + amount + " completed from account "
-                                + sourceAccount.getAccountNumber() + " to account " + targetAccount.getAccountNumber());
-                    }
-                    return OperationResult.failure("Transfer failed due to insufficient balance or account rules.");
-                } catch (IllegalArgumentException e) {
-                    return OperationResult.failure("Transfer failed: " + e.getMessage());
-                }
-            }
         Account source = repository.findAccount(sourceAccountNumber);
         if (source == null) {
             return OperationResult.failure("Source account not found: " + sourceAccountNumber);
@@ -70,11 +55,9 @@ public class TransferOperation implements AccountOperation {
 
     @Override
     public String getDescription() {
-        return "Transfer of " + amount + " from account " + sourceAccount.getAccountNumber()
-                + " to account " + targetAccount.getAccountNumber();
+        return "Transfer of " + amount + " from account " + sourceAccountNumber
+                + " to account " + targetAccountNumber;
     }
-
-}return"Transfer of "+amount+" from account "+sourceAccountNumber+" to account "+targetAccountNumber;}
 
     @Override
     public List<Integer> getInvolvedAccountNumbers() {

@@ -6,6 +6,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * Base type for immutable transaction records.
+ */
 public abstract class BaseTransaction implements Serializable {
     private static final long serialVersionUID = 1L;
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -15,23 +18,19 @@ public abstract class BaseTransaction implements Serializable {
     private final String transactionId;
 
     protected BaseTransaction(double amount) {
-<<<<<<< HEAD:src/main/java/banking/transaction/BaseTransaction.java
         this(amount, LocalDateTime.now(), generateTransactionId());
-=======
-        this(amount, null, null);
-    }
-
-    protected BaseTransaction(double amount, String transactionId, LocalDateTime timestamp) {
-        this.amount = amount;
-        this.timestamp = timestamp == null ? LocalDateTime.now() : timestamp;
-        this.transactionId = transactionId == null ? generateTransactionId() : transactionId;
->>>>>>> origin/pr/14:src/banking/transaction/BaseTransaction.java
     }
 
     protected BaseTransaction(double amount, LocalDateTime timestamp, String transactionId) {
         this.amount = amount;
         this.timestamp = Objects.requireNonNull(timestamp, "timestamp");
         this.transactionId = Objects.requireNonNull(transactionId, "transactionId");
+    }
+
+    protected BaseTransaction(double amount, String transactionId, LocalDateTime timestamp) {
+        this(amount,
+                timestamp == null ? LocalDateTime.now() : timestamp,
+                transactionId == null ? generateTransactionId() : transactionId);
     }
 
     private static String generateTransactionId() {

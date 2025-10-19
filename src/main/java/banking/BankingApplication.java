@@ -1,7 +1,11 @@
 package banking;
 
 import banking.api.BankHttpServer;
-import banking.persistence.BankDAO;
+import banking.persistence.AccountRepository;
+import banking.persistence.memory.InMemoryAccountRepository;
+import banking.persistence.jdbc.JdbcAccountRepository;
+import banking.persistence.jdbc.JdbcConnectionProvider;
+import banking.persistence.jdbc.MigrationRunner;
 import banking.security.AuthenticationService;
 import banking.security.AuthorizationService;
 import banking.security.CredentialStore;
@@ -12,49 +16,50 @@ import banking.security.TokenService;
 import banking.service.Bank;
 import banking.ui.ConsoleUI;
 
-import java.time.Duration;
-import java.util.Set;
-import banking.persistence.AccountRepository;
-import banking.persistence.jdbc.JdbcAccountRepository;
-import banking.persistence.jdbc.JdbcConnectionProvider;
-import banking.persistence.jdbc.MigrationRunner;
-import banking.persistence.memory.InMemoryAccountRepository;
-import banking.service.Bank;
-import banking.ui.ConsoleUI;
-
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Duration;
 import java.util.Properties;
+import java.util.Set;
 
+/**
+ * Boots the interactive console experience.
+ */
 public final class BankingApplication {
+    private static final int DEFAULT_API_PORT = 8080;
+
     private BankingApplication() {
     }
 
     public static void main(String[] args) {
-        Bank bank = BankDAO.loadBank();
-        PasswordHasher hasher = new PasswordHasher();
-        CredentialStore credentialStore = bootstrapCredentials(hasher);
-        TokenService tokenService = new TokenService();
-        AuthorizationService authorizationService = new AuthorizationService();
-        AuthenticationService authenticationService = new AuthenticationService(
-                credentialStore, hasher, tokenService, Duration.ofHours(2));
-        BankHttpServer httpServer = new BankHttpServer(bank, 8080, tokenService, authorizationService);
-        ConsoleUI ui = new ConsoleUI(bank, authenticationService, tokenService, httpServer);
-        ui.start();
-    }
-
-    private static CredentialStore bootstrapCredentials(PasswordHasher hasher) {
-        CredentialStore store = new CredentialStore();
-        store.store(new OperatorCredential("admin", hasher.hash("admin123!"), Set.of(Role.ADMIN)));
-        store.store(new OperatorCredential("teller", hasher.hash("teller123!"), Set.of(Role.TELLER)));
-        store.store(new OperatorCredential("auditor", hasher.hash("auditor123!"), Set.of(Role.AUDITOR)));
-        return store;
         Properties properties = loadProperties();
         String persistence = resolve(properties, "banking.persistence", "BANKING_PERSISTENCE", "memory");
         AccountRepository repository = createRepository(persistence, properties);
         Bank bank = new Bank(repository);
-        ConsoleUI ui = new ConsoleUI(bank);
+
+        PasswordHasher hasher = new PasswordHasher();
+        CredentialStore credentialStore = bootstrapCredentials(hasher, properties);
+        TokenService tokenService = new TokenService();
+        AuthorizationService authorizationService = new AuthorizationService();
+        AuthenticationService authenticationService = new AuthenticationService(
+                credentialStore, hasher, tokenService, Duration.ofHours(2));
+
+        int apiPort = resolveApiPort(properties);
+        BankHttpServer httpServer = new BankHttpServer(bank, apiPort, tokenService, authorizationService);
+
+        ConsoleUI ui = new ConsoleUI(bank, authenticationService, tokenService, httpServer);
         ui.start();
+    }
+
+    private static CredentialStore bootstrapCredentials(PasswordHasher hasher, Properties properties) {
+        CredentialStore store = new CredentialStore();
+        String adminPassword = resolve(properties, "banking.credentials.admin", "BANKING_ADMIN_PASSWORD", "admin123!");
+        String tellerPassword = resolve(properties, "banking.credentials.teller", "BANKING_TELLER_PASSWORD", "teller123!");
+        String auditorPassword = resolve(properties, "banking.credentials.auditor", "BANKING_AUDITOR_PASSWORD", "auditor123!");
+        store.store(new OperatorCredential("admin", hasher.hash(adminPassword), Set.of(Role.ADMIN)));
+        store.store(new OperatorCredential("teller", hasher.hash(tellerPassword), Set.of(Role.TELLER)));
+        store.store(new OperatorCredential("auditor", hasher.hash(auditorPassword), Set.of(Role.AUDITOR)));
+        return store;
     }
 
     private static AccountRepository createRepository(String persistence, Properties properties) {
@@ -76,6 +81,18 @@ public final class BankingApplication {
             return new JdbcAccountRepository(provider);
         }
         return new InMemoryAccountRepository();
+    }
+
+    private static int resolveApiPort(Properties properties) {
+        String override = resolve(properties, "banking.api.port", "BANKING_API_PORT", null);
+        if (override == null || override.isBlank()) {
+            return DEFAULT_API_PORT;
+        }
+        try {
+            return Integer.parseInt(override.trim());
+        } catch (NumberFormatException ex) {
+            return DEFAULT_API_PORT;
+        }
     }
 
     private static Properties loadProperties() {

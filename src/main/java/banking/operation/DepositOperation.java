@@ -1,19 +1,15 @@
 package banking.operation;
 
 import banking.account.Account;
-
-public class DepositOperation implements AccountOperation {
-    private final Account account;
-    private final double amount;
-
-    public DepositOperation(Account account, double amount) {
-        this.account = account;
 import banking.persistence.AccountRepository;
 import banking.persistence.PersistenceException;
 
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Deposits funds into an account and persists the updated state.
+ */
 public class DepositOperation implements AccountOperation {
     private final AccountRepository repository;
     private final int accountNumber;
@@ -28,12 +24,6 @@ public class DepositOperation implements AccountOperation {
 
     @Override
     public OperationResult execute() {
-        try {
-            account.deposit(amount);
-            return OperationResult.success("Deposit of " + amount + " completed for account "
-                    + account.getAccountNumber());
-        } catch (IllegalArgumentException e) {
-            return OperationResult.failure("Deposit failed: " + e.getMessage());
         Account account = repository.findAccount(accountNumber);
         if (account == null) {
             return OperationResult.failure("Account not found: " + accountNumber);
@@ -42,7 +32,9 @@ public class DepositOperation implements AccountOperation {
             account.deposit(amount);
             repository.saveAccount(account);
             affectedAccount = account;
-            return OperationResult.success("Deposit of " + amount + " completed for account " + accountNumber);
+            return OperationResult.success(
+                "Deposit of " + amount + " completed for account " + accountNumber
+            );
         } catch (IllegalArgumentException e) {
             return OperationResult.failure("Deposit failed: " + e.getMessage());
         } catch (PersistenceException e) {
@@ -52,7 +44,6 @@ public class DepositOperation implements AccountOperation {
 
     @Override
     public String getDescription() {
-        return "Deposit of " + amount + " to account " + account.getAccountNumber();
         return "Deposit of " + amount + " to account " + accountNumber;
     }
 

@@ -12,12 +12,12 @@ public class TransferTransaction extends BaseTransaction {
         this.targetAccountNumber = targetAccountNumber;
     }
 
-    public TransferTransaction(double amount, int targetAccountNumber, java.time.LocalDateTime timestamp,
-            String transactionId) {
+    public TransferTransaction(double amount, int targetAccountNumber, LocalDateTime timestamp, String transactionId) {
         super(amount, timestamp, transactionId);
+        this.targetAccountNumber = targetAccountNumber;
+    }
 
-    public TransferTransaction(double amount, int targetAccountNumber, String transactionId,
-            LocalDateTime timestamp) {
+    public TransferTransaction(double amount, int targetAccountNumber, String transactionId, LocalDateTime timestamp) {
         super(amount, transactionId, timestamp);
         this.targetAccountNumber = targetAccountNumber;
     }
